@@ -1,186 +1,256 @@
 // controllers/saleController.js
 import Sale from "../models/Sale.js";
-import { recalcBalance } from "./customerController.js";
+import Customer from "../models/Customer.js";
 
-// ── Response helpers ──────────────────────────────────────────────────────────
-const ok = (res, data, msg = "Success") =>
-  res.json({ success: true, message: msg, data });
-const err = (res, msg, status = 500) =>
-  res.status(status).json({ success: false, message: msg, data: null });
-
-// ── GET ALL ───────────────────────────────────────────────────────────────────
-export const getAll = async (req, res) => {
+// ── GET all sales — with date, type, payment, search filters ──────────────
+export const getAllSales = async (req, res) => {
   try {
-    const { from, to, customerId, search, saleType = "sale" } = req.query;
-    const filter = { saleType };
+    const {
+      customerId,
+      saleType,
+      paymentMode,
+      dateFrom,
+      dateTo,
+      search,
+      limit,
+    } = req.query;
+
+    const filter = {};
     if (customerId) filter.customerId = customerId;
-    if (from || to) {
+    if (saleType) filter.saleType = saleType;
+    if (paymentMode) filter.paymentMode = paymentMode;
+
+    // Date range filter
+    if (dateFrom || dateTo) {
       filter.invoiceDate = {};
-      if (from) filter.invoiceDate.$gte = from;
-      if (to) filter.invoiceDate.$lte = to;
+      if (dateFrom) filter.invoiceDate.$gte = dateFrom;
+      if (dateTo) filter.invoiceDate.$lte = dateTo;
     }
+
+    // Text search — invoice no, customer name, phone
     if (search) {
+      const r = new RegExp(search, "i");
       filter.$or = [
-        { invoiceNo: { $regex: search, $options: "i" } },
-        { customerName: { $regex: search, $options: "i" } },
+        { invoiceNo: r },
+        { customerName: r },
+        { customerPhone: r },
+        { remarks: r },
       ];
     }
+
     const sales = await Sale.find(filter)
       .sort({ invoiceDate: -1, createdAt: -1 })
-      .populate("customerId", "name code phone")
-      .lean();
-    console.log(`✅ GET sales (${saleType}) — found ${sales.length}`);
-    ok(res, sales);
+      .limit(Number(limit) || 500);
+
+    res.json({ success: true, data: sales, count: sales.length });
   } catch (e) {
-    console.error("❌ GET sales error:", e.message);
-    err(res, e.message);
+    res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── NEXT INVOICE NUMBER ───────────────────────────────────────────────────────
-export const getNextInvoiceNo = async (req, res) => {
+// ── GET summary stats — for dashboard cards ───────────────────────────────
+export const getSaleSummary = async (req, res) => {
   try {
-    const saleType = req.query.saleType || "sale";
-    const prefix = saleType === "return" ? "RTN" : "INV";
-    const count = await Sale.countDocuments({ saleType });
-    const next = `${prefix}-${String(count + 1).padStart(5, "0")}`;
-    console.log("✅ Next invoice:", next);
-    ok(res, { invoiceNo: next });
-  } catch (e) {
-    console.error("❌ Next invoice error:", e.message);
-    err(res, e.message);
-  }
-};
-
-// ── GET ONE ───────────────────────────────────────────────────────────────────
-export const getOne = async (req, res) => {
-  try {
-    const sale = await Sale.findById(req.params.id)
-      .populate("customerId", "name code phone")
-      .lean();
-    if (!sale) {
-      console.warn("⚠️ Sale not found:", req.params.id);
-      return err(res, "Sale not found", 404);
+    const { dateFrom, dateTo } = req.query;
+    const dateFilter = {};
+    if (dateFrom || dateTo) {
+      dateFilter.invoiceDate = {};
+      if (dateFrom) dateFilter.invoiceDate.$gte = dateFrom;
+      if (dateTo) dateFilter.invoiceDate.$lte = dateTo;
     }
-    console.log("✅ GET sale:", sale.invoiceNo);
-    ok(res, sale);
-  } catch (e) {
-    console.error("❌ GET one sale error:", e.message);
-    err(res, e.message);
-  }
-};
 
-// ── CREATE ────────────────────────────────────────────────────────────────────
-export const create = async (req, res) => {
-  try {
-    console.log("📥 CREATE sale payload:", JSON.stringify(req.body, null, 2));
-    const sale = new Sale(req.body);
-    await sale.save();
-    if (sale.customerId) await recalcBalance(sale.customerId);
-    console.log("✅ Sale created:", sale.invoiceNo);
-    ok(res, sale, "Sale saved");
-  } catch (e) {
-    console.error("❌ CREATE sale error:", e.message);
-    err(res, e.message);
-  }
-};
-
-// ── UPDATE ────────────────────────────────────────────────────────────────────
-export const update = async (req, res) => {
-  try {
-    console.log("📝 UPDATE sale id:", req.params.id);
-    const sale = await Sale.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true, runValidators: true },
-    );
-    if (!sale) {
-      console.warn("⚠️ Sale not found for update:", req.params.id);
-      return err(res, "Sale not found", 404);
-    }
-    if (sale.customerId) await recalcBalance(sale.customerId);
-    console.log("✅ Sale updated:", sale.invoiceNo);
-    ok(res, sale, "Sale updated");
-  } catch (e) {
-    console.error("❌ UPDATE sale error:", e.message);
-    err(res, e.message);
-  }
-};
-
-// ── DELETE ────────────────────────────────────────────────────────────────────
-export const remove = async (req, res) => {
-  try {
-    console.log("🗑 DELETE sale id:", req.params.id);
-    const sale = await Sale.findByIdAndDelete(req.params.id);
-    if (!sale) {
-      console.warn("⚠️ Sale not found for delete:", req.params.id);
-      return err(res, "Sale not found", 404);
-    }
-    if (sale.customerId) await recalcBalance(sale.customerId);
-    console.log("✅ Sale deleted:", sale.invoiceNo);
-    ok(res, sale, "Sale deleted");
-  } catch (e) {
-    console.error("❌ DELETE sale error:", e.message);
-    err(res, e.message);
-  }
-};
-
-// ── CREATE RETURN ─────────────────────────────────────────────────────────────
-export const createReturn = async (req, res) => {
-  try {
-    console.log("↩️ CREATE return for sale:", req.body.originalSaleId);
-    const orig = await Sale.findById(req.body.originalSaleId);
-    if (!orig) {
-      console.warn("⚠️ Original sale not found");
-      return err(res, "Original sale not found", 404);
-    }
-    const { items, remarks, invoiceDate } = req.body;
-    const subTotal = items.reduce((s, i) => s + (i.amount || 0), 0);
-    const returnSale = new Sale({
-      saleType: "return",
-      originalSaleId: orig._id,
-      invoiceDate: invoiceDate || new Date().toISOString().split("T")[0],
-      customerId: orig.customerId,
-      customerName: orig.customerName,
-      customerPhone: orig.customerPhone,
-      items,
-      subTotal,
-      extraDisc: 0,
-      discAmount: 0,
-      netTotal: subTotal,
-      paidAmount: 0,
-      balance: 0,
-      paymentMode: orig.paymentMode,
-      remarks,
-    });
-    await returnSale.save();
-    if (returnSale.customerId) await recalcBalance(returnSale.customerId);
-    console.log("✅ Return created:", returnSale.invoiceNo);
-    ok(res, returnSale, "Return saved");
-  } catch (e) {
-    console.error("❌ CREATE return error:", e.message);
-    err(res, e.message);
-  }
-};
-
-// ── STATS ─────────────────────────────────────────────────────────────────────
-export const getStats = async (req, res) => {
-  try {
-    const today = new Date().toISOString().split("T")[0];
-    const [todaySales, totalSales] = await Promise.all([
-      Sale.find({ saleType: "sale", invoiceDate: today }).lean(),
-      Sale.find({ saleType: "sale" }).lean(),
+    const [debit, credit, cash, bank, cheque, returns] = await Promise.all([
+      Sale.aggregate([
+        { $match: { ...dateFilter, paymentMode: "Credit", saleType: "sale" } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+            balance: { $sum: "$balance" },
+          },
+        },
+      ]),
+      Sale.aggregate([
+        {
+          $match: {
+            ...dateFilter,
+            paymentMode: { $in: ["Cash", "Bank", "Cheque"] },
+            saleType: "sale",
+            $or: [{ customerId: null }, { customerId: { $exists: false } }],
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+          },
+        },
+      ]),
+      Sale.aggregate([
+        { $match: { ...dateFilter, paymentMode: "Cash", saleType: "sale" } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+          },
+        },
+      ]),
+      Sale.aggregate([
+        { $match: { ...dateFilter, paymentMode: "Bank", saleType: "sale" } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+          },
+        },
+      ]),
+      Sale.aggregate([
+        { $match: { ...dateFilter, paymentMode: "Cheque", saleType: "sale" } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+          },
+        },
+      ]),
+      Sale.aggregate([
+        { $match: { ...dateFilter, saleType: "return" } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            total: { $sum: "$netTotal" },
+          },
+        },
+      ]),
     ]);
-    const stats = {
-      todayCount: todaySales.length,
-      todayTotal: todaySales.reduce((s, x) => s + x.netTotal, 0),
-      totalCount: totalSales.length,
-      totalAmount: totalSales.reduce((s, x) => s + x.netTotal, 0),
-    };
-    console.log("✅ Stats:", stats);
-    ok(res, stats);
+
+    // All sales combined
+    const allFilter = { ...dateFilter, saleType: "sale" };
+    const all = await Sale.aggregate([
+      { $match: allFilter },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          total: { $sum: "$netTotal" },
+          paid: { $sum: "$paidAmount" },
+          balance: { $sum: "$balance" },
+        },
+      },
+    ]);
+
+    const g = (arr) => arr[0] || { count: 0, total: 0, balance: 0, paid: 0 };
+
+    res.json({
+      success: true,
+      data: {
+        all: g(all),
+        debit: g(debit),
+        cash: g(cash),
+        bank: g(bank),
+        cheque: g(cheque),
+        walkin: g(credit), // walk-in counter
+        returns: g(returns),
+      },
+    });
   } catch (e) {
-    console.error("❌ GET stats error:", e.message);
-    err(res, e.message);
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+// ── GET single sale ────────────────────────────────────────────────────────
+export const getSaleById = async (req, res) => {
+  try {
+    const sale = await Sale.findById(req.params.id).populate(
+      "customerId",
+      "name phone code",
+    );
+    if (!sale)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found" });
+    res.json({ success: true, data: sale });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+// ── GET next invoice number ────────────────────────────────────────────────
+export const getNextInvoice = async (req, res) => {
+  try {
+    const last = await Sale.findOne({}, {}, { sort: { createdAt: -1 } });
+    let num = 1;
+    if (last?.invoiceNo) {
+      const n = parseInt(last.invoiceNo.replace("INV-", ""));
+      if (!isNaN(n)) num = n + 1;
+    }
+    res.json({
+      success: true,
+      data: { invoiceNo: `INV-${String(num).padStart(5, "0")}` },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+// ── POST create sale ───────────────────────────────────────────────────────
+export const createSale = async (req, res) => {
+  try {
+    const last = await Sale.findOne({}, {}, { sort: { createdAt: -1 } });
+    let num = 1;
+    if (last?.invoiceNo) {
+      const n = parseInt(last.invoiceNo.replace("INV-", ""));
+      if (!isNaN(n)) num = n + 1;
+    }
+    const invoiceNo = `INV-${String(num).padStart(5, "0")}`;
+    const sale = await Sale.create({ ...req.body, invoiceNo });
+
+    // Update customer balance if credit
+    if (sale.customerId && sale.balance > 0) {
+      await Customer.findByIdAndUpdate(sale.customerId, {
+        $inc: { currentBalance: sale.balance },
+      });
+    }
+
+    res.status(201).json({ success: true, data: sale });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
+// ── PUT update sale ────────────────────────────────────────────────────────
+export const updateSale = async (req, res) => {
+  try {
+    const sale = await Sale.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!sale)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found" });
+    res.json({ success: true, data: sale });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
+// ── DELETE sale ────────────────────────────────────────────────────────────
+export const deleteSale = async (req, res) => {
+  try {
+    const sale = await Sale.findByIdAndDelete(req.params.id);
+    if (!sale)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sale not found" });
+    res.json({ success: true, message: "Sale deleted" });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
   }
 };

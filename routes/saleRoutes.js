@@ -1,25 +1,22 @@
-// routes/saleRoutes.js — ESM
 import express from "express";
 import {
-  getAll,
-  getOne,
-  create,
-  update,
-  remove,
-  createReturn,
-  getNextInvoiceNo,
-  getStats,
+  getAllSales,
+  getSaleById,
+  getSaleSummary,
+  createSale,
+  updateSale,
+  deleteSale,
+  getNextInvoice,
 } from "../controllers/saleController.js";
 
 const router = express.Router();
 
-router.get("/next-invoice", getNextInvoiceNo);
-router.get("/stats", getStats);
-router.get("/", getAll);
-router.get("/:id", getOne);
-router.post("/", create);
-router.post("/return", createReturn);
-router.put("/:id", update);
-router.delete("/:id", remove);
+router.get("/next-invoice", getNextInvoice);
+router.get("/summary", getSaleSummary);
+router.get("/", getAllSales);
+router.get("/:id", getSaleById);
+router.post("/", createSale);
+router.put("/:id", updateSale);
+router.delete("/:id", deleteSale);
 
 export default router;
