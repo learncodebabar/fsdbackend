@@ -4,8 +4,11 @@ import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import productRoutes from "./routes/productRoutes.js";
 import saleRoutes from "./routes/saleRoutes.js";
-import errorHandler from "./middleware/errorHandler.js";
 import customerRoutes from "./routes/customerRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+import errorHandler from "./middleware/errorHandler.js";
+import journalRoutes from "./routes/journalRoutes.js";
+
 dotenv.config();
 
 const app = express();
@@ -20,7 +23,8 @@ app.use(express.json());
 app.use("/api/products", productRoutes);
 app.use("/api/sales", saleRoutes);
 app.use("/api/customers", customerRoutes);
-
+app.use("/api/payments", paymentRoutes);
+app.use("/api/journal", journalRoutes);
 app.get("/", (req, res) => {
   res.json({ message: "Shop Management API is running" });
 });

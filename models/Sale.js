@@ -1,25 +1,40 @@
 // models/Sale.js
 import mongoose from "mongoose";
 
-const saleItemSchema = new mongoose.Schema(
-  {
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
-    code: { type: String, default: "" },
-    description: { type: String, default: "" },
-    measurement: { type: String, default: "" },
-    rack: { type: String, default: "" },
-    qty: { type: Number, default: 1 },
-    rate: { type: Number, default: 0 },
-    disc: { type: Number, default: 0 },
-    amount: { type: Number, default: 0 },
-  },
-  { _id: false },
-);
+const saleItemSchema = new mongoose.Schema({
+  productId: { type: String, default: "" },
+  code: { type: String, default: "" },
+  description: { type: String, required: true },
+  measurement: { type: String, default: "" },
+  rack: { type: String, default: "" },
+  qty: { type: Number, required: true, default: 1 },
+  rate: { type: Number, default: 0 },
+  disc: { type: Number, default: 0 },
+  amount: { type: Number, default: 0 },
+});
 
 const saleSchema = new mongoose.Schema(
   {
-    invoiceNo: { type: String, unique: true },
+    invoiceNo: { type: String, required: true, unique: true },
     invoiceDate: { type: String, required: true },
+    saleType: { type: String, default: "sale", enum: ["sale", "return"] },
+    saleSource: {
+      type: String,
+      default: "cash",
+      enum: ["debit", "credit", "cash"],
+    }, // debit=DebitSalePage, credit=CreditSalePage, cash=Counter
+    saleSource: {
+      type: String,
+      default: "cash",
+      enum: ["cash", "credit", "debit"],
+    }, // cash=counter, credit=credit sale, debit=debit/purchase
+    paymentMode: {
+      type: String,
+      default: "Cash",
+      enum: ["Cash", "Credit", "Bank", "Cheque", "Partial"],
+    },
+
+    // Customer
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
@@ -27,43 +42,24 @@ const saleSchema = new mongoose.Schema(
     },
     customerName: { type: String, default: "COUNTER SALE" },
     customerPhone: { type: String, default: "" },
+
+    // Items
     items: [saleItemSchema],
+
+    // Amounts
     subTotal: { type: Number, default: 0 },
-    extraDisc: { type: Number, default: 0 },
+    extraDisc: { type: Number, default: 0 }, // extra discount amount
     discAmount: { type: Number, default: 0 },
     netTotal: { type: Number, default: 0 },
     prevBalance: { type: Number, default: 0 },
     paidAmount: { type: Number, default: 0 },
     balance: { type: Number, default: 0 },
-    paymentMode: {
-      type: String,
-      enum: ["Cash", "Credit", "Bank", "Cheque"],
-      default: "Cash",
-    },
-    saleType: { type: String, enum: ["sale", "return"], default: "sale" },
-    originalSaleId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Sale",
-      default: null,
-    },
-    remarks: { type: String, default: "" },
-    printType: { type: String, default: "Thermal" },
+
     sendSms: { type: Boolean, default: false },
+    remarks: { type: String, default: "" },
+    status: { type: String, default: "Active", enum: ["Active", "Cancelled"] },
   },
   { timestamps: true },
 );
 
- 
-saleSchema.pre("save", async function () {
-  if (!this.invoiceNo) {
-    const prefix = this.saleType === "return" ? "RTN" : "INV";
-    const count = await mongoose
-      .model("Sale")
-      .countDocuments({ saleType: this.saleType });
-    this.invoiceNo = `${prefix}-${String(count + 1).padStart(5, "0")}`;
-    console.log("🔑 Auto-generated invoiceNo:", this.invoiceNo);
-  }
-});
-
-const Sale = mongoose.model("Sale", saleSchema);
-export default Sale;
+export default mongoose.model("Sale", saleSchema);
